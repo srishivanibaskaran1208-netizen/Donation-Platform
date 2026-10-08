@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>GiveAgain – Donate clothes and household items</title>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#edf2f1;--card:#fff;--ink:#12263a;--mut:#5d6f7e;--acc:#0b7a75;--sun:#f2a900;--bad:#b3341f;--line:#d5dfdd}
+*{box-sizing:border-box}
+body{margin:0;font:16px/1.55 'Bricolage Grotesque',system-ui,sans-serif;background:var(--bg);color:var(--ink)}
+header{display:flex;flex-wrap:wrap;gap:10px;justify-content:space-between;align-items:center;padding:14px 20px;background:var(--ink);color:#fff}
+header b{font-size:24px;font-weight:800;letter-spacing:-.5px}header b i{color:var(--sun);font-style:normal}
+header span{font-size:14px;opacity:.85}
+main{max-width:1020px;margin:20px auto;padding:0 16px;display:grid;gap:16px}
+.hero{padding:28px 4px 4px}.hero h1{font-size:clamp(30px,6vw,52px);line-height:1.05;margin:0 0 10px;font-weight:800;letter-spacing:-1.5px;max-width:14em}
+.hero p{max-width:34em;color:var(--mut);margin:0}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:18px}
+h2{font-size:20px;margin:0 0 12px;font-weight:800}
+.cols{display:grid;grid-template-columns:2fr 1fr;gap:16px}@media(max-width:800px){.cols{grid-template-columns:1fr}}
+input,select,textarea,button{font:inherit;padding:9px 11px;border-radius:8px;border:1px solid var(--line);width:100%;background:#fff;color:var(--ink)}
+button{width:auto;background:var(--acc);color:#fff;border:0;cursor:pointer;font-weight:600}
+button.alt{background:#fff;color:var(--ink);border:1px solid var(--line)}button.bad{background:var(--bad)}button.sm{padding:5px 10px;font-size:14px}
+:focus-visible{outline:3px solid var(--sun);outline-offset:1px}
+label{display:block;font-size:14px;color:var(--mut);margin:10px 0 3px}
+.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px}
+.item{padding:12px 0;border-top:1px solid var(--line)}.item:first-of-type{border:0}
+.top{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center}
+.mut{color:var(--mut);font-size:14px}.acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+.badge{display:inline-block;padding:2px 10px;border-radius:99px;font-size:13px;font-weight:600;background:#e3ecea}
+.Requested{background:#fff0c2}.Accepted,.Collected{background:#d2ede9}.Distributed{background:#b9e3c6}.Declined,.Cancelled{background:#f5d4cd}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px}
+.stats div{border-left:4px solid var(--sun);padding:4px 10px}.stats b{font-size:26px;display:block;line-height:1.1}
+.tabs{display:flex;gap:6px;margin-bottom:12px}.tabs button{background:#fff;color:var(--ink);border:1px solid var(--line)}.tabs .on{background:var(--ink);color:#fff}
+.irow{display:grid;grid-template-columns:1.2fr 2fr .7fr;gap:8px;margin-bottom:8px}
+#toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;padding:10px 16px;border-radius:8px;display:none;max-width:90%}
+.note{font-size:14px;padding:8px 0;border-top:1px solid var(--line)}
+</style>
+</head>
+<body>
+<header><b>Give<i>Again</i></b><span id="who"></span></header>
+<main id="app"></main>
+<div id="toast" role="status"></div>
+<script>
+const $ = s => document.querySelector(s), app = $('#app');
+let token = localStorage.getItem('t'), me = null, cats = [], mode = 'login', tab = 'donate';
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const when = d => new Date(d).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+const api = async (p, m = 'GET', b) => {
+  const r = await fetch('/api' + p, { method: m, headers: { 'Content-Type': 'application/json', ...(token && { Authorization: 'Bearer ' + token }) }, body: b && JSON.stringify(b) });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.error || 'Something went wrong. Try again.');
+  return d;
+};
+const toast = t => { const e = $('#toast'); e.textContent = t; e.style.display = 'block'; clearTimeout(e.t); e.t = setTimeout(() => e.style.display = 'none', 3500); };
+const run = f => async (...a) => { try { await f(...a); } catch (e) { toast(e.message); } };
+const val = id => document.getElementById(id)?.value.trim();
+
+// ---------- Auth ----------
+function authView() {
+  $('#who').textContent = '';
+  const reg = mode === 'register';
+  app.innerHTML = `<section class="hero"><h1>Give your unused things a second life.</h1><p>List clothes and household items, pick a verified NGO or orphanage, and schedule a doorstep pickup. Follow your donation until it reaches someone who needs it.</p></section>
+  <form class="card" style="max-width:520px" onsubmit="event.preventDefault();submitAuth()">
+    <div class="tabs"><button type="button" class="${reg ? '' : 'on'}" onclick="mode='login';authView()">Sign in</button><button type="button" class="${reg ? 'on' : ''}" onclick="mode='register';authView()">Create account</button></div>
+    ${reg ? `<label for="role">I am a</label><select id="role" onchange="$('#ngof').style.display=this.value==='ngo'?'block':'none'"><option value="donor">Donor</option><option value="ngo">NGO / orphanage / beneficiary</option></select>
+    <label for="name">Name or organisation</label><input id="name" required>` : ''}
+    <label for="email">Email</label><input id="email" type="email" required>
+    <label for="password">Password</label><input id="password" type="password" minlength="6" required>
+    ${reg ? `<div class="row"><div><label for="city">City</label><input id="city" required></div><div><label for="phone">Phone</label><input id="phone"></div></div>
+    <label for="address">Address</label><input id="address">
+    <div id="ngof" style="display:none"><label for="orgType">Type</label><select id="orgType"><option>NGO</option><option>Orphanage</option><option>Individual in need</option></select>
+    <label for="description">What do you need most?</label><textarea id="description" rows="2"></textarea></div>` : ''}
+    <div class="acts"><button>${reg ? 'Create account' : 'Sign in'}</button></div>
+    ${reg ? '' : '<p class="mut">Admin demo: admin@donate.local / admin123</p>'}
+  </form>`;
+}
+const submitAuth = run(async () => {
+  const body = { email: val('email'), password: val('password') };
+  if (mode === 'register') ['role', 'name', 'city', 'phone', 'address', 'orgType', 'description'].forEach(k => body[k] = val(k));
+  const d = await api(mode === 'register' ? '/register' : '/login', 'POST', body);
+  token = d.token; localStorage.setItem('t', token); boot();
+});
+const logout = () => { localStorage.removeItem('t'); token = null; me = null; mode = 'login'; authView(); };
+
+// ---------- Shared ----------
+const timeline = d => d.history.map(h => `<span class="badge ${h.status}" title="${when(h.at)}">${h.status}</span>`).join(' → ');
+const itemsText = d => d.items.map(i => `${i.quantity} × ${esc(i.description)} <span class="mut">(${esc(i.category)})</span>`).join('<br>');
+async function notesCard() {
+  const n = await api('/notifications');
+  return `<div class="card"><h2>Updates</h2>${n.map(x => `<div class="note">${esc(x.text)}<br><span class="mut">${when(x.at)}</span></div>`).join('') || '<p class="mut">Nothing yet. Updates about your donations appear here.</p>'}</div>`;
+}
+const setStatus = run(async (id, s) => { await api(`/donations/${id}/status`, 'PATCH', { status: s }); toast('Status updated: ' + s); render(); });
+const complain = run(async id => { const t = prompt('Describe the problem'); if (t) { await api('/complaints', 'POST', { donationId: id, text: t }); toast('Complaint sent to the admin team.'); } });
+
+// ---------- Donor ----------
+function addRow() {
+  const d = document.createElement('div'); d.className = 'irow';
+  d.innerHTML = `<select aria-label="Category">${cats.map(c => `<option>${esc(c)}</option>`).join('')}</select><input aria-label="Description" placeholder="e.g. Winter jackets, adult sizes"><input aria-label="Quantity" type="number" min="1" value="1">`;
+  $('#rows').appendChild(d);
+}
+async function donorView() {
+  const [ngos, dons, notes] = await Promise.all([api('/ngos?city=' + encodeURIComponent(me.city)), api('/donations'), notesCard()]);
+  app.innerHTML = `<div class="cols"><div style="display:grid;gap:16px">
+  <form class="card" onsubmit="event.preventDefault();donate()"><h2>New donation</h2>
+    <label for="ngoId">Give to</label><select id="ngoId">${ngos.map(n => `<option value="${n.id}">${esc(n.name)} – ${esc(n.orgType)}, ${esc(n.city)}</option>`).join('') || '<option value="">No verified organisations in your city yet</option>'}</select>
+    <label>Items</label><div id="rows"></div><button type="button" class="alt sm" onclick="addRow()">Add another item</button>
+    <div class="row"><div><label for="addr">Pickup address</label><input id="addr" value="${esc(me.address)}" required></div><div><label for="when">Pickup time</label><input id="when" type="datetime-local" required></div></div>
+    <div class="acts"><button>Schedule pickup</button></div></form>
+  <div class="card"><h2>Your donations</h2>${dons.map(d => `<div class="item"><div class="top"><b>${esc(d.ngo)}</b><span class="badge ${d.status}">${d.status}</span></div>
+    <div>${itemsText(d)}</div><div class="mut">Pickup ${when(d.scheduledAt)} · ${esc(d.address)}</div><div class="mut">${timeline(d)}</div>
+    <div class="acts">${['Requested', 'Accepted'].includes(d.status) ? `<button class="bad sm" onclick="setStatus('${d.id}','Cancelled')">Cancel</button>` : ''}
+    ${['Collected', 'Distributed'].includes(d.status) && !d.rating ? `<select class="sm" style="width:auto" onchange="rate('${d.id}',this.value)"><option value="">Rate this pickup</option>${[5, 4, 3, 2, 1].map(n => `<option>${n}</option>`).join('')}</select>` : d.rating ? `<span class="mut">Rated ${d.rating}/5</span>` : ''}
+    <button class="alt sm" onclick="complain('${d.id}')">Report a problem</button></div></div>`).join('') || '<p class="mut">No donations yet. Fill in the form above to schedule your first pickup.</p>'}</div></div>
+  <div style="display:grid;gap:16px;align-content:start"><div class="card"><h2>Verified near you</h2>${ngos.map(n => `<div class="item"><b>${esc(n.name)}</b><div class="mut">${esc(n.orgType)} · ${esc(n.city)}</div><div class="mut">${esc(n.description)}</div></div>`).join('') || `<p class="mut">None in ${esc(me.city)} yet.</p>`}</div>${notes}</div></div>`;
+  addRow();
+}
+const donate = run(async () => {
+  const items = [...document.querySelectorAll('.irow')].map(r => { const [c, d, q] = r.children; return { category: c.value, description: d.value, quantity: +q.value }; });
+  await api('/donations', 'POST', { ngoId: val('ngoId'), items, address: val('addr'), scheduledAt: new Date(val('when')).toISOString() });
+  toast('Pickup requested. The organisation will confirm soon.'); render();
+});
+const rate = run(async (id, v) => { if (v) { await api(`/donations/${id}/rate`, 'POST', { rating: v }); toast('Thanks for rating.'); render(); } });
+
+// ---------- NGO ----------
+async function ngoView() {
+  const [dons, notes] = await Promise.all([api('/donations'), notesCard()]);
+  const act = d => ({ Requested: `<button class="sm" onclick="setStatus('${d.id}','Accepted')">Accept pickup</button><button class="bad sm" onclick="setStatus('${d.id}','Declined')">Decline</button>`,
+    Accepted: `<button class="sm" onclick="setStatus('${d.id}','Collected')">Mark collected</button>`, Collected: `<button class="sm" onclick="setStatus('${d.id}','Distributed')">Mark distributed</button>` }[d.status] || '');
+  app.innerHTML = `<div class="cols"><div style="display:grid;gap:16px">${me.verified ? '' : '<div class="card" style="border-color:var(--sun)"><b>Waiting for verification.</b> Donors can see and choose you once an admin verifies your organisation.</div>'}
+  <div class="card"><h2>Donation requests</h2>${dons.map(d => `<div class="item"><div class="top"><b>From ${esc(d.donor)}</b><span class="badge ${d.status}">${d.status}</span></div>
+    <div>${itemsText(d)}</div><div class="mut">Pickup ${when(d.scheduledAt)} · ${esc(d.address)}, ${esc(d.city)}</div>
+    <div class="acts">${act(d)}<button class="alt sm" onclick="complain('${d.id}')">Report a problem</button></div></div>`).join('') || '<p class="mut">No requests yet. Donors in your city will send them here.</p>'}</div></div>${notes}</div>`;
+}
+
+// ---------- Admin ----------
+const verify = run(async (id, v) => { await api(`/admin/ngos/${id}/verify`, 'PUT', { verified: v }); render(); });
+const resolve = run(async id => { await api('/admin/complaints/' + id, 'PATCH'); render(); });
+const addCat = run(async () => { await api('/categories', 'POST', { name: val('cat') }); render(); });
+async function adminView() {
+  const [s, ngos, dons, comps, notes] = await Promise.all([api('/admin/stats'), api('/ngos'), api('/donations'), api('/admin/complaints'), notesCard()]);
+  const st = [['Donors', s.donors], ['NGOs', s.ngos], ['Donations', s.donations], ['Collected', s.collected], ['Distributed', s.distributed], ['Repeat donors', s.repeatRate + '%'], ['Avg hours to collect', s.avgCollectionHours], ['Avg rating', s.avgRating || '–']];
+  app.innerHTML = `<div class="card"><h2>Overview</h2><div class="stats">${st.map(([l, v]) => `<div><b>${v}</b><span class="mut">${l}</span></div>`).join('')}</div></div>
+  <div class="cols"><div style="display:grid;gap:16px"><div class="card"><h2>Organisations (${s.pendingNgos} awaiting verification)</h2>${ngos.map(n => `<div class="item top"><div><b>${esc(n.name)}</b> <span class="badge">${n.verified ? 'Verified' : 'Pending'}</span><div class="mut">${esc(n.orgType)} · ${esc(n.city)} · ${esc(n.email)} · ${esc(n.phone)}</div></div>
+    <button class="sm ${n.verified ? 'alt' : ''}" onclick="verify('${n.id}',${!n.verified})">${n.verified ? 'Remove verification' : 'Verify'}</button></div>`).join('') || '<p class="mut">No organisations registered yet.</p>'}</div>
+  <div class="card"><h2>All donations</h2>${dons.map(d => `<div class="item"><div class="top"><b>${esc(d.donor)} → ${esc(d.ngo)}</b><span class="badge ${d.status}">${d.status}</span></div><div class="mut">${d.items.map(i => i.quantity + ' × ' + esc(i.description)).join(', ')} · ${when(d.scheduledAt)}</div></div>`).join('') || '<p class="mut">No donations yet.</p>'}</div></div>
+  <div style="display:grid;gap:16px;align-content:start"><div class="card"><h2>Complaints</h2>${comps.map(c => `<div class="item"><b>${esc(c.from)}</b> <span class="badge">${c.status}</span><div>${esc(c.text)}</div>${c.status === 'Open' ? `<div class="acts"><button class="sm" onclick="resolve('${c.id}')">Mark resolved</button></div>` : ''}</div>`).join('') || '<p class="mut">No complaints.</p>'}</div>
+  <div class="card"><h2>Item categories</h2><p>${cats.map(esc).join(', ')}</p><label for="cat">New category</label><input id="cat"><div class="acts"><button class="sm" onclick="addCat()">Add category</button></div></div>${notes}</div></div>`;
+}
+
+// ---------- Boot ----------
+const render = run(async () => { await ({ donor: donorView, ngo: ngoView, admin: adminView }[me.role])(); });
+const boot = run(async () => {
+  if (!token) return authView();
+  try { me = await api('/me'); } catch { return logout(); }
+  cats = await api('/categories');
+  $('#who').innerHTML = `${esc(me.name)} (${me.role}) <button class="alt sm" onclick="logout()">Sign out</button>`;
+  render();
+});
+boot();
+</script>
+</body>
+</html>
